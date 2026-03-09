@@ -1,27 +1,3 @@
-"""
-==============================================================
-  AI-Based Face & Weapon Recognition System
-  Module: Face Recognition (Terminal Interface)
-  
-  Student Project — BSCS 7th Evening / C
-  Domain: Artificial Intelligence based System
-==============================================================
-
-  USAGE:
-      python main.py
-
-  WORKFLOW:
-      1. Enroll a criminal (captures face from webcam)
-      2. Train the model on enrolled faces
-      3. Run Live Recognition (webcam opens with real-time detection)
-
-  STORAGE:
-      data/criminal_db/     → Enrolled face images per person
-      data/criminal_records.db → SQLite database
-      data/captured_faces/  → Detection snapshots
-      models/               → Trained LBPH model
-==============================================================
-"""
 
 import os
 import sys
@@ -56,9 +32,9 @@ from config import ENROLL_FRAME_COUNT, CAMERA_INDEX
 # ── Banner ────────────────────────────────────────────────────────────────────
 BANNER = r"""
 ╔══════════════════════════════════════════════════════════════╗
-║      AI-BASED FACE & WEAPON RECOGNITION SYSTEM               ║
+║      AI-BASED FACE & WEAPON RECOGNITION SYSTEM              ║
 ║      Module: Face Recognition                                ║
-║      BSCS 8th Evening / C                                    ║
+║      BSCS 8th Evening / C  —  AI Domain                     ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -126,8 +102,8 @@ def enroll_criminal(db, engine, trainer):
 
     print(f"\n  [DB] Record created — ID: {criminal_id}, Face Label: {face_label}")
     print(f"  [CAM] Opening webcam to collect face samples...")
-    print(f"  [CAM] Will capture {ENROLL_FRAME_COUNT} frames.")
-    print(f"  [CAM] Look at the camera, vary your angle slightly for best results.\n")
+    print(f"  [CAM] Will capture {ENROLL_FRAME_COUNT} frames across multiple angles.")
+    print(f"  [CAM] Follow on-screen instructions for best results.\n")
 
     input("  Press ENTER to open camera...")
 
@@ -141,6 +117,9 @@ def enroll_criminal(db, engine, trainer):
     except RuntimeError as e:
         print(f"\n  ✗ Camera error: {e}")
         print("  → Check your webcam connection.")
+        return
+    except Exception as e:
+        print(f"\n  ✗ Unexpected error: {e}")
         return
 
     if len(samples) < 10:
@@ -207,6 +186,8 @@ def start_live_recognition(engine, db, monitor):
     except RuntimeError as e:
         print(f"\n  ✗ Camera error: {e}")
         print("  → Check webcam connection and index in config.py (CAMERA_INDEX).\n")
+    except Exception as e:
+        print(f"\n  ✗ Unexpected error: {e}\n")
 
 
 def view_all_records(db):
@@ -225,8 +206,14 @@ def view_all_records(db):
     print("  " + "─" * 68)
 
     for c in criminals:
-        print(f"  {c['id']:<5} {c['name']:<22} {c.get('crime_type','N/A'):<18} "
-              f"{c.get('status','N/A'):<12} {c.get('cnic','N/A'):<16}")
+        # Handle None values properly
+        cid = c.get('id', 'N/A')
+        name = c.get('name') or 'N/A'
+        crime = c.get('crime_type') or 'N/A'
+        status = c.get('status') or 'N/A'
+        cnic = c.get('cnic') or 'N/A'
+        
+        print(f"  {cid:<5} {name:<22} {crime:<18} {status:<12} {cnic:<16}")
 
     print("═" * 70)
     print(f"  Total: {len(criminals)} record(s)\n")
@@ -244,10 +231,10 @@ def view_detection_logs(db):
         return
 
     for log in logs:
-        ts   = log.get("timestamp", "N/A")
-        name = log.get("detected_name", "Unknown")
+        ts = log.get("timestamp") or "N/A"
+        name = log.get("detected_name") or "Unknown"
         conf = log.get("confidence", 0.0)
-        cam  = log.get("camera_id", "N/A")
+        cam = log.get("camera_id") or "N/A"
         print(f"  [{ts}]  {name:<20}  Conf: {conf:<7.2f}  Camera: {cam}")
 
     print("═" * 70)
@@ -263,9 +250,13 @@ def delete_criminal(db, trainer, engine):
     view_all_records(db)
 
     try:
-        cid = int(input("  Enter Criminal ID to delete (0 to cancel): ").strip())
+        cid_input = input("  Enter Criminal ID to delete (0 to cancel): ").strip()
+        if not cid_input:
+            print("  ✗ Invalid input.")
+            return
+        cid = int(cid_input)
     except ValueError:
-        print("  ✗ Invalid input.")
+        print("  ✗ Invalid input. Please enter a number.")
         return
 
     if cid == 0:
@@ -277,7 +268,8 @@ def delete_criminal(db, trainer, engine):
         print(f"  ✗ No criminal with ID {cid} found.")
         return
 
-    print(f"\n  Will delete: {record['name']} (ID: {cid})")
+    name = record.get('name') or 'Unknown'
+    print(f"\n  Will delete: {name} (ID: {cid})")
     if not confirm("  Are you sure?"):
         print("  Cancelled.")
         return
@@ -286,9 +278,11 @@ def delete_criminal(db, trainer, engine):
     print(f"  ✓ Record deleted.")
 
     if confirm("  Re-train model to apply changes?"):
+        print("\n  Re-training model...")
         trainer.full_retrain()
         label_map = db.get_label_criminal_map()
         engine.update_label_map(label_map)
+        print("  ✓ Model updated.\n")
 
 
 def system_status(db, engine):
@@ -297,21 +291,21 @@ def system_status(db, engine):
     print("  SYSTEM STATUS")
     print("═" * 55)
 
-    criminals    = db.list_all_criminals()
+    criminals = db.list_all_criminals()
     total_images = 0
     for c in criminals:
-        idir = c.get("image_dir", "")
+        idir = c.get("image_dir") or ""
         if idir and os.path.isdir(idir):
-            total_images += len([f for f in os.listdir(idir) if f.endswith(".jpg")])
+            total_images += len([f for f in os.listdir(idir) if f.endswith((".jpg", ".png"))])
 
-    print(f"  Database       : {'✓ Connected':}")
+    print(f"  Database       : ✓ Connected")
     print(f"  Enrolled People: {len(criminals)}")
     print(f"  Total Images   : {total_images}")
     print(f"  Model Trained  : {'✓ YES' if engine.model_loaded else '✗ NO — train first'}")
     print(f"  Detection Logs : {db.get_detection_count()} events")
     print(f"  Log File       : {LOG_FILE}")
 
-    from config import CRIMINAL_DB_DIR, CAPTURED_DIR, MODELS_DIR, LBPH_MODEL_PATH
+    from config import CRIMINAL_DB_DIR, CAPTURED_DIR, LBPH_MODEL_PATH
     print(f"\n  Paths:")
     print(f"    Criminal DB   → {CRIMINAL_DB_DIR}")
     print(f"    Captures      → {CAPTURED_DIR}")
@@ -333,6 +327,8 @@ def main():
         monitor = LiveMonitor(engine, db)
     except Exception as e:
         print(f"\n[BOOT] ✗ Initialization failed: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     # Load label map into engine (needed for recognition)

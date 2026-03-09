@@ -1,6 +1,7 @@
 """
 ==============================================================
   AI Face Recognition System — Central Configuration
+  PRODUCTION GRADE: Optimized for stability
 ==============================================================
 """
 
@@ -24,24 +25,58 @@ LBPH_MODEL_PATH  = os.path.join(MODELS_DIR, "lbph_face_model.xml")
 # ── Cascade Classifier ────────────────────────────────────────────────────────
 import cv2
 FACE_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+FACE_PROFILE_CASCADE = cv2.data.haarcascades + "haarcascade_profileface.xml"  # NEW: For side profiles
 EYE_CASCADE_PATH  = cv2.data.haarcascades + "haarcascade_eye.xml"
 
-# ── Face Detection Parameters ─────────────────────────────────────────────────
-DETECTION_SCALE_FACTOR   = 1.1       # Haar cascade scale factor
-DETECTION_MIN_NEIGHBORS  = 5         # Higher = fewer false positives
-DETECTION_MIN_SIZE       = (60, 60)  # Minimum face size in pixels
+# ── Face Detection Parameters — OPTIMIZED FOR STABILITY ───────────────────────
+# ENROLLMENT (strict - only high quality faces)
+ENROLL_SCALE_FACTOR   = 1.15
+ENROLL_MIN_NEIGHBORS  = 7
+ENROLL_MIN_SIZE       = (80, 80)
 
-# ── Recognition Thresholds ────────────────────────────────────────────────────
-# LBPH distance: lower = more similar. Values above threshold → "Unknown"
-RECOGNITION_CONFIDENCE_THRESHOLD = 70   # Tune: 50 (strict) → 85 (lenient)
-UNKNOWN_LABEL                     = "Unknown"
+# LIVE MONITORING (lenient - catch all angles, never lose tracking)
+DETECTION_SCALE_FACTOR   = 1.05      # Lower = more sensitive (was 1.15)
+DETECTION_MIN_NEIGHBORS  = 3         # Lower = more detections (was 7)
+DETECTION_MIN_SIZE       = (50, 50)  # Smaller = detect farther away (was 80x80)
+
+# ── Recognition Thresholds — TUNED FOR STABILITY ──────────────────────────────
+RECOGNITION_CONFIDENCE_THRESHOLD = 130   # Higher = more lenient (was 70)
+UNKNOWN_LABEL = "Unknown"
+
+# Recognition stability
+RECOGNITION_SMOOTHING_FRAMES = 5     # Average over last 7 frames
+RECOGNITION_CONFIDENCE_ALPHA = 0.3   # Smoothing factor (lower = more stable)
 
 # ── Image Capture Settings ────────────────────────────────────────────────────
-ENROLL_FRAME_COUNT    = 60    # How many face images to capture per person
-ENROLL_CAPTURE_DELAY  = 0.05  # Seconds between captures (to get variety)
+ENROLL_FRAME_COUNT    = 100   # iPhone style continuous rotation
+ENROLL_CAPTURE_DELAY  = 0.15
+ENROLL_COUNTDOWN      = 3
+
+# Camera settings
 FRAME_WIDTH           = 640
 FRAME_HEIGHT          = 480
-CAMERA_INDEX          = 0     # 0 = default webcam
+CAMERA_INDEX          = 0
+
+# ── Enrollment Guide Strategy ─────────────────────────────────────────────────
+ENROLLMENT_PROMPTS = [
+    "Look STRAIGHT at camera",
+    "Turn head slightly to your LEFT",
+    "Turn head slightly to your RIGHT", 
+    "Tilt head UP slightly",
+    "Tilt head DOWN slightly",
+    "Look STRAIGHT again",
+    "Smile naturally",
+    "Neutral expression",
+    "Move closer to camera",
+    "Move back slightly",
+    "Turn LEFT again",
+    "Turn RIGHT again",
+    "Look STRAIGHT - final shots",
+]
+
+# Quality thresholds
+ENABLE_BLUR_DETECTION = True
+BLUR_THRESHOLD        = 80.0   # Lowered for more acceptance (was 100)
 
 # ── UI Colors (BGR format for OpenCV) ─────────────────────────────────────────
 COLOR_GREEN    = (0,   220,  0  )
@@ -51,10 +86,11 @@ COLOR_BLUE     = (220, 100,  0  )
 COLOR_WHITE    = (255, 255, 255 )
 COLOR_BLACK    = (0,   0,   0   )
 COLOR_ORANGE   = (0,   165, 255 )
+COLOR_PURPLE   = (255, 0,   255 )
 
 # ── Alert Settings ────────────────────────────────────────────────────────────
-ALERT_COOLDOWN_SECONDS = 30   # Min seconds between repeated alerts for same person
-SNAPSHOT_ON_DETECTION  = True # Save snapshot when criminal is recognized
+ALERT_COOLDOWN_SECONDS = 30
+SNAPSHOT_ON_DETECTION  = True
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE = os.path.join(LOGS_DIR, "system.log")
