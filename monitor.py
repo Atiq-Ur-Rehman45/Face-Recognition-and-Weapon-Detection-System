@@ -34,7 +34,7 @@ class LatestFrameCamera:
         self._frame_count = 0
 
     def start(self):
-        self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
         self.cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS_TARGET)

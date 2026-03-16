@@ -241,7 +241,7 @@ def view_detection_logs(db):
 
 
 def delete_criminal(db, trainer, engine):
-    """Delete a criminal record and optionally re-train."""
+    """Delete a criminal record and always re-train to prevent stale identities."""
     print("\n" + "═" * 55)
     print("  DELETE CRIMINAL RECORD")
     print("═" * 55)
@@ -273,15 +273,26 @@ def delete_criminal(db, trainer, engine):
         print("  Cancelled.")
         return
 
-    db.delete_criminal(cid)
-    print(f"  ✓ Record deleted.")
+    purge_snaps = confirm("  Also delete this person's detection snapshots from captured_faces?")
+    result = db.delete_criminal(cid, purge_snapshots=purge_snaps)
 
-    if confirm("  Re-train model to apply changes?"):
-        print("\n  Re-training model...")
-        trainer.full_retrain()
-        label_map = db.get_label_criminal_map()
-        engine.update_label_map(label_map)
-        print("  ✓ Model updated.\n")
+    if not result.get("deleted"):
+        print("  ✗ Delete failed.")
+        return
+
+    print("  ✓ Record, related logs, and training images removed.")
+
+    print("\n  Re-training model to remove stale identities...")
+    success = trainer.full_retrain()
+
+    # Always refresh runtime label map after delete.
+    label_map = db.get_label_criminal_map()
+    engine.update_label_map(label_map)
+
+    if success:
+        print("  ✓ Model updated and label map refreshed.\n")
+    else:
+        print("  ⚠ Re-train had no data or failed; label map refreshed, recognition model may be empty.\n")
 
 
 def system_status(db, engine):

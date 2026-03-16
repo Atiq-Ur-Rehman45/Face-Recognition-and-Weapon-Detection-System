@@ -27,6 +27,7 @@ class FaceEngine:
         self._sface_embedding_matrix = np.empty((0, 0), dtype=np.float32)
         self._sface_frame_index = 0
         self._sface_track_cache = []
+        self._sface_track_seq = 0
         
         print(f"\n[ENGINE] ═══════════════════════════════════════")
         print(f"[ENGINE] Booting: {self.engine_type} Recognition Engine")
@@ -157,10 +158,36 @@ class FaceEngine:
             return best_idx
         return -1
 
+    def _sface_quality_gate(self, frame, box):
+        """Reject low-quality detections before identity matching."""
+        x, y, w, h = box
+        frame_area = float(max(1, frame.shape[0] * frame.shape[1]))
+        face_area_ratio = (w * h) / frame_area
+        if face_area_ratio < SFACE_RECOG_MIN_FACE_AREA_RATIO:
+            return False, "face_too_small"
+
+        y1 = max(0, y)
+        y2 = min(frame.shape[0], y + h)
+        x1 = max(0, x)
+        x2 = min(frame.shape[1], x + w)
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0:
+            return False, "face_out_of_frame"
+
+        if ENABLE_BLUR_DETECTION:
+            roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            blur_score = self.estimate_blur(roi_gray)
+            if blur_score < SFACE_RECOG_BLUR_THRESHOLD:
+                return False, "blurry"
+
+        return True, "ok"
+
     def _run_sface_match(self, frame, face):
-        """Compute recognition for a single detected face."""
+        """Compute raw recognition scores for one detected face."""
         best_match_label = -1
         best_score = 0.0
+        second_score = 0.0
+        score_margin = 0.0
         name = UNKNOWN_LABEL
 
         if self.model_loaded and self._sface_embedding_matrix.size > 0:
@@ -175,17 +202,18 @@ class FaceEngine:
                     best_index = int(np.argmax(scores))
                     best_score = float(scores[best_index])
                     best_match_label = int(self._sface_labels[best_index])
+                    if scores.size > 1:
+                        second_score = float(np.partition(scores, -2)[-2])
+                    score_margin = best_score - second_score
 
-                if best_score > SFACE_MATCH_THRESHOLD:
+                if best_match_label != -1:
                     criminal = self.label_map.get(best_match_label)
                     name = criminal["name"] if criminal else f"ID_{best_match_label}"
-                else:
-                    best_match_label = -1
 
             except Exception as e:
                 logger.warning(f"[ENGINE] SFace recognition error: {e}")
 
-        return best_match_label, best_score, name
+        return best_match_label, best_score, second_score, score_margin, name
 
     def _init_lbph(self):
         """Initialize Legacy Haar Cascades + LBPH."""
@@ -222,7 +250,7 @@ class FaceEngine:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _recognize_sface(self, frame):
-        """SFace detection and recognition with proper landmark alignment."""
+        """SFace detection and recognition with quality, margin, and temporal gating."""
         self._sface_frame_index += 1
         height, width = frame.shape[:2]
         self._set_sface_input_size((width, height))
@@ -241,47 +269,104 @@ class FaceEngine:
             box = (int(x), int(y), int(w), int(h))
 
             cache_idx = self._find_cache_track(box)
-            reuse_cached = False
 
             if cache_idx != -1:
-                cached = self._sface_track_cache[cache_idx]
-                frame_gap = self._sface_frame_index - cached["last_recognition_frame"]
-                if frame_gap <= SFACE_CACHE_REUSE_FRAMES:
-                    best_match_label = cached["label"]
-                    best_score = cached["confidence"]
-                    name = cached["name"]
-                    reuse_cached = True
-                else:
-                    best_match_label, best_score, name = self._run_sface_match(frame, face)
+                track = self._sface_track_cache[cache_idx]
+                track["box"] = box
+                track["last_seen_ts"] = now_ts
             else:
-                best_match_label, best_score, name = self._run_sface_match(frame, face)
-
-            criminal_data = self.label_map.get(best_match_label) if best_match_label != -1 else None
-
-            if not reuse_cached:
-                track_payload = {
+                self._sface_track_seq += 1
+                track = {
+                    "track_id": self._sface_track_seq,
                     "box": box,
-                    "label": int(best_match_label),
-                    "confidence": float(best_score),
-                    "name": name,
                     "last_seen_ts": now_ts,
                     "last_recognition_frame": self._sface_frame_index,
+                    "candidate_history": deque(maxlen=SFACE_CONSENSUS_WINDOW),
+                    "known_label": -1,
+                    "known_name": UNKNOWN_LABEL,
+                    "hold_until_frame": 0,
                 }
-                if cache_idx != -1:
-                    self._sface_track_cache[cache_idx] = track_payload
-                else:
-                    self._sface_track_cache.append(track_payload)
-            elif cache_idx != -1:
-                self._sface_track_cache[cache_idx]["box"] = box
-                self._sface_track_cache[cache_idx]["last_seen_ts"] = now_ts
+                self._sface_track_cache.append(track)
+
+            # Backward-safe defaults for pre-existing tracks in cache.
+            track.setdefault("known_label", -1)
+            track.setdefault("known_name", UNKNOWN_LABEL)
+            track.setdefault("hold_until_frame", 0)
+
+            best_match_label, best_score, second_score, score_margin, matched_name = self._run_sface_match(frame, face)
+
+            quality_ok, quality_reason = self._sface_quality_gate(frame, box)
+            consensus_count = 0
+
+            # Hysteresis: stricter thresholds to acquire identity, softer thresholds to maintain it.
+            acquiring_score_ok = best_score >= SFACE_MATCH_THRESHOLD_ACQUIRE
+            acquiring_margin_ok = score_margin >= SFACE_MARGIN_THRESHOLD_ACQUIRE
+            maintaining_same_label = (
+                track["known_label"] != -1 and best_match_label == track["known_label"]
+            )
+            maintaining_score_ok = best_score >= SFACE_MATCH_THRESHOLD_MAINTAIN
+            maintaining_margin_ok = score_margin >= SFACE_MARGIN_THRESHOLD_MAINTAIN
+
+            candidate_acquire = (
+                quality_ok
+                and best_match_label != -1
+                and acquiring_score_ok
+                and acquiring_margin_ok
+            )
+            candidate_maintain = (
+                quality_ok
+                and maintaining_same_label
+                and maintaining_score_ok
+                and maintaining_margin_ok
+            )
+
+            # Keep vote history only for acquisition stage.
+            track["candidate_history"].append(int(best_match_label) if candidate_acquire else -1)
+            if best_match_label != -1:
+                consensus_count = sum(1 for label in track["candidate_history"] if label == best_match_label)
+
+            just_acquired = candidate_acquire and consensus_count >= SFACE_CONSENSUS_FRAMES
+            if just_acquired:
+                track["known_label"] = int(best_match_label)
+                track["known_name"] = matched_name
+                track["hold_until_frame"] = self._sface_frame_index + SFACE_KNOWN_HOLD_FRAMES
+
+            hold_active = (
+                track["known_label"] != -1
+                and self._sface_frame_index <= track["hold_until_frame"]
+                and best_match_label in (-1, track["known_label"])
+            )
+
+            is_known = just_acquired or candidate_maintain or hold_active
+
+            if is_known and track["known_label"] != -1:
+                final_label = int(track["known_label"])
+                final_name = track["known_name"]
+                criminal_data = self.label_map.get(final_label)
+                if candidate_maintain:
+                    track["hold_until_frame"] = self._sface_frame_index + SFACE_KNOWN_HOLD_FRAMES
+            else:
+                final_label = -1
+                final_name = UNKNOWN_LABEL
+                criminal_data = None
+                if self._sface_frame_index > track["hold_until_frame"]:
+                    track["known_label"] = -1
+                    track["known_name"] = UNKNOWN_LABEL
+
+            track["last_recognition_frame"] = self._sface_frame_index
             
             results.append({
                 "x": int(x), "y": int(y), "w": int(w), "h": int(h),
-                "label": best_match_label,
+                "label": final_label,
                 "confidence": float(best_score),
-                "name": name,
+                "name": final_name,
                 "criminal": criminal_data,
-                "is_known": best_match_label != -1
+                "is_known": is_known,
+                "score_margin": float(score_margin),
+                "second_score": float(second_score),
+                "quality_ok": quality_ok,
+                "quality_reason": quality_reason,
+                "consensus_count": int(consensus_count),
             })
         
         return results, frame
@@ -431,11 +516,14 @@ class FaceEngine:
             print("[ENGINE] ✗ No valid faces found in training data")
             return False
         
-        # Average embeddings per person for maximum stability
+        # Rebuild from scratch to avoid stale/deleted labels persisting.
+        rebuilt_db = {}
         for label, features in embeddings_by_label.items():
             avg_embedding = np.mean(features, axis=0)
-            self.embeddings_db[label] = avg_embedding
-            print(f"  [+] Label {label}: {len(features)} samples → 1 optimized embedding")
+            rebuilt_db[label] = avg_embedding
+            print(f"  [+] Label {label}: {len(features)} samples -> 1 optimized embedding")
+
+        self.embeddings_db = rebuilt_db
         self._refresh_sface_index()
         
         # Save to disk
@@ -559,6 +647,29 @@ class FaceEngine:
             return pitch >= 0.64
         return True
 
+    def _liveness_pose_delta_ok(self, angle, yaw, pitch, baseline):
+        """Check that current stage shows real head movement from a front baseline."""
+        if baseline is None or yaw is None or pitch is None:
+            return False
+
+        base_yaw = baseline.get("yaw")
+        base_pitch = baseline.get("pitch")
+        if base_yaw is None or base_pitch is None:
+            return False
+
+        angle = (angle or "").upper()
+        delta = ENROLL_REQUIRED_POSE_DELTA
+
+        if angle == "LEFT":
+            return (base_yaw - yaw) >= delta
+        if angle == "RIGHT":
+            return (yaw - base_yaw) >= delta
+        if angle == "UP":
+            return (base_pitch - pitch) >= delta
+        if angle == "DOWN":
+            return (pitch - base_pitch) >= delta
+        return True
+
     def collect_face_samples(self, camera_index=0, target_count=None, label=0, save_dir=None):
         """
         Collect face samples from webcam with guided UI prompts and non-blocking pauses.
@@ -569,16 +680,18 @@ class FaceEngine:
         strategy = ENROLLMENT_STRATEGY
         total_target = sum(s["count"] for s in strategy)
         
-        cap = cv2.VideoCapture(camera_index)
+        # ── 1. FORCE DIRECTSHOW (Bypass MSMF Timeout) ──
+        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
         cap.set(cv2.CAP_PROP_FPS, 30)
-        cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)      # ✨ NEW
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)     # ✨ NEW
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)      
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)     
     
-        # ✨ NEW: Warmup
+        # ── 2. TIME-BASED WARMUP (Fixes the read-loop freeze) ──
         print("[ENGINE] Warming up camera...")
-        for _ in range(WARMUP_FRAMES):
+        warmup_start = time.time()
+        while time.time() - warmup_start < 2.0:
             cap.read()
         
         if not cap.isOpened():
@@ -623,6 +736,8 @@ class FaceEngine:
         total_collected = 0
         pause_until = 0  # Controls the non-blocking UI pause
         stage_start_time = time.time()
+        stage_stable_frames = 0
+        front_pose_baseline = None
         stage_metrics = [
             {
                 "angle": stage.get("angle", f"STAGE_{idx + 1}"),
@@ -649,6 +764,7 @@ class FaceEngine:
             instruction = current_stage["instruction"]
             stage_elapsed = now - stage_start_time
             pose_relaxed = stage_elapsed >= ENROLL_POSE_RELAX_AFTER_SECONDS
+            liveness_ok = (not ENROLL_LIVENESS_CHALLENGE_ENABLED) or self.engine_type != "SFACE"
             
             # ── NON-BLOCKING PAUSE UI ──────────────────────────────────
             if now < pause_until:
@@ -757,6 +873,9 @@ class FaceEngine:
             if pose_relaxed and self.engine_type == "SFACE":
                 cv2.putText(display, "POSE ASSIST: RELAXED", (FRAME_WIDTH - 260, 105),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_YELLOW, 2)
+            if stage_elapsed >= ENROLL_STAGE_TIMEOUT_SECONDS:
+                cv2.putText(display, "STAGE TIMEOUT: ADJUST LIGHT/ANGLE", (FRAME_WIDTH - 360, 80),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.48, COLOR_YELLOW, 2)
             
             if face_detected:
                 box_color = COLOR_GREEN if (quality_ok and pose_ok) else COLOR_YELLOW
@@ -766,14 +885,43 @@ class FaceEngine:
                     pose_text = f"Yaw:{yaw:.2f} Pitch:{pitch:.2f}"
                     cv2.putText(display, pose_text,
                                (x, max(20, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_WHITE, 1)
+
+                if quality_ok and pose_ok and self.engine_type == "SFACE" and ENROLL_LIVENESS_CHALLENGE_ENABLED:
+                    if current_angle.upper() == "FRONT":
+                        liveness_ok = True
+                    else:
+                        liveness_ok = self._liveness_pose_delta_ok(
+                            current_angle,
+                            yaw,
+                            pitch,
+                            front_pose_baseline
+                        )
+                        if not liveness_ok:
+                            quality_message = "LIVENESS: TURN HEAD AS PROMPTED"
+                            reject_reason = "liveness_pose_delta"
+                elif quality_ok and pose_ok:
+                    liveness_ok = True
+
+                if quality_ok and pose_ok and liveness_ok:
+                    stage_stable_frames += 1
+                else:
+                    stage_stable_frames = 0
                 
                 # Auto-capture logic
-                if quality_ok and pose_ok and (now - last_capture >= capture_delay):
+                if quality_ok and pose_ok and liveness_ok and stage_stable_frames >= ENROLL_MIN_STABLE_FRAMES and (now - last_capture >= capture_delay):
                     collected.append(frame.copy())
                     angle_count += 1
                     total_collected += 1
                     last_capture = now
                     stage_metrics[current_angle_idx]["accepted"] += 1
+
+                    if self.engine_type == "SFACE" and current_angle.upper() == "FRONT" and yaw is not None and pitch is not None:
+                        if front_pose_baseline is None:
+                            front_pose_baseline = {"yaw": yaw, "pitch": pitch}
+                        else:
+                            # Keep a running baseline to stabilize liveness checks across front samples.
+                            front_pose_baseline["yaw"] = (front_pose_baseline["yaw"] + yaw) * 0.5
+                            front_pose_baseline["pitch"] = (front_pose_baseline["pitch"] + pitch) * 0.5
                     
                     if save_dir:
                         img_path = os.path.join(save_dir, f"{current_angle}_{angle_count:02d}.jpg")
@@ -794,6 +942,7 @@ class FaceEngine:
                     if angle_count >= target_for_angle:
                         current_angle_idx += 1
                         angle_count = 0
+                        stage_stable_frames = 0
                         print(f"[ENGINE] ✓ {current_angle} complete!\n")
                         
                         if current_angle_idx < len(strategy):

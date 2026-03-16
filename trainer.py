@@ -8,7 +8,7 @@
 import cv2
 import os
 import logging
-from config import RECOGNITION_ENGINE
+from config import RECOGNITION_ENGINE, SFACE_DB_PATH, LBPH_MODEL_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,22 @@ class TrainingManager:
         data = self.load_training_data_from_disk()
 
         if not data:
-            print("[TRAINER] ✗ No training data found. Enroll at least one person first.")
+            print("[TRAINER] ⚠ No training data found. Clearing model state...")
+
+            # Clear runtime state.
+            self.engine.model_loaded = False
+            self.engine.update_label_map({})
+
+            if RECOGNITION_ENGINE == "SFACE":
+                self.engine.embeddings_db = {}
+                self.engine._refresh_sface_index()
+                if os.path.exists(SFACE_DB_PATH):
+                    os.remove(SFACE_DB_PATH)
+            else:
+                if os.path.exists(LBPH_MODEL_PATH):
+                    os.remove(LBPH_MODEL_PATH)
+
+            print("[TRAINER] ✓ Model state cleared (no enrolled persons remain).")
             return False
 
         success = self.engine.train(data)

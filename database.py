@@ -1,6 +1,6 @@
 import sqlite3
 import os
-import json
+import shutil
 from datetime import datetime
 from config import DB_PATH, CRIMINAL_DB_DIR
 
@@ -92,10 +92,64 @@ class DatabaseManager:
             rows = conn.execute("SELECT * FROM criminals ORDER BY id ASC").fetchall()
         return [dict(r) for r in rows]
 
-    def delete_criminal(self, criminal_id):
+    def delete_criminal(self, criminal_id, purge_snapshots=False):
+        """
+        Delete a criminal record plus related training images.
+        Optionally delete their detection snapshot files from captured_faces.
+        """
+        record = self.get_criminal_by_id(criminal_id)
+        if not record:
+            print(f"[DB] Criminal ID {criminal_id} not found.")
+            return {
+                "deleted": False,
+                "reason": "not_found",
+                "detection_logs_deleted": 0,
+                "image_dir_removed": False,
+                "snapshots_removed": 0,
+            }
+
+        image_dir = record.get("image_dir")
+        snapshot_paths = []
+
         with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT snapshot_path FROM detection_logs WHERE criminal_id = ?",
+                (criminal_id,)
+            ).fetchall()
+            snapshot_paths = [r["snapshot_path"] for r in rows if r["snapshot_path"]]
+
+            conn.execute("DELETE FROM detection_logs WHERE criminal_id = ?", (criminal_id,))
             conn.execute("DELETE FROM criminals WHERE id = ?", (criminal_id,))
-        print(f"[DB] Criminal ID {criminal_id} deleted.")
+
+        image_dir_removed = False
+        if image_dir and os.path.isdir(image_dir):
+            shutil.rmtree(image_dir, ignore_errors=True)
+            image_dir_removed = True
+
+        snapshots_removed = 0
+        if purge_snapshots:
+            for path in snapshot_paths:
+                try:
+                    if path and os.path.isfile(path):
+                        os.remove(path)
+                        snapshots_removed += 1
+                except OSError:
+                    # Keep delete flow resilient even if one file is locked/missing.
+                    pass
+
+        print(
+            f"[DB] Criminal ID {criminal_id} deleted. "
+            f"Logs removed: {len(snapshot_paths)} | "
+            f"Image dir removed: {image_dir_removed} | "
+            f"Snapshots removed: {snapshots_removed}"
+        )
+
+        return {
+            "deleted": True,
+            "detection_logs_deleted": len(snapshot_paths),
+            "image_dir_removed": image_dir_removed,
+            "snapshots_removed": snapshots_removed,
+        }
 
     def update_criminal(self, criminal_id, **kwargs):
         """Update fields on a criminal record."""

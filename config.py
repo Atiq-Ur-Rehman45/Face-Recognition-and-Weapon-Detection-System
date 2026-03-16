@@ -36,11 +36,33 @@ YUNET_NMS_THRESHOLD = 0.3           # Non-maximum suppression (0.0-1.0)
 YUNET_TOP_K = 5000                  # Max detections to consider
 
 # ── SFace Recognition Parameters ──────────────────────────────────────────────
-SFACE_MATCH_THRESHOLD = 0.40       # Cosine similarity threshold
-                                     # 0.30-0.35 = Lenient (more matches, some false positives)
-                                     # 0.363     = Recommended (balanced)
-                                     # 0.40-0.45 = Strict (fewer false positives, may miss some)
-                                     # 0.50+     = Very strict (high security mode)
+SFACE_OPERATING_PROFILE = "BALANCED"   # BALANCED, SECURITY_FIRST, RECALL_FIRST
+
+if SFACE_OPERATING_PROFILE == "SECURITY_FIRST":
+    SFACE_MATCH_THRESHOLD_ACQUIRE = 0.60 # Very strict, lowest false positives
+    SFACE_MATCH_THRESHOLD_MAINTAIN = 0.57
+    SFACE_MARGIN_THRESHOLD_ACQUIRE = 0.08
+    SFACE_MARGIN_THRESHOLD_MAINTAIN = 0.06
+    SFACE_CONSENSUS_FRAMES = 4           # Need more agreeing frames before confirmed known
+elif SFACE_OPERATING_PROFILE == "RECALL_FIRST":
+    SFACE_MATCH_THRESHOLD_ACQUIRE = 0.50 # Lenient, higher recall
+    SFACE_MATCH_THRESHOLD_MAINTAIN = 0.47
+    SFACE_MARGIN_THRESHOLD_ACQUIRE = 0.04
+    SFACE_MARGIN_THRESHOLD_MAINTAIN = 0.03
+    SFACE_CONSENSUS_FRAMES = 2
+else:
+    SFACE_MATCH_THRESHOLD_ACQUIRE = 0.53 # Balanced default after field tuning
+    SFACE_MATCH_THRESHOLD_MAINTAIN = 0.50
+    SFACE_MARGIN_THRESHOLD_ACQUIRE = 0.045
+    SFACE_MARGIN_THRESHOLD_MAINTAIN = 0.03
+    SFACE_CONSENSUS_FRAMES = 2
+
+SFACE_MATCH_THRESHOLD = SFACE_MATCH_THRESHOLD_ACQUIRE  # Compatibility alias
+SFACE_MARGIN_THRESHOLD = SFACE_MARGIN_THRESHOLD_ACQUIRE
+SFACE_CONSENSUS_WINDOW = 6              # Track this many recent frames per face track
+SFACE_KNOWN_HOLD_FRAMES = 4             # Keep confirmed identity for N brief unstable frames
+SFACE_RECOG_MIN_FACE_AREA_RATIO = 0.035 # Reject tiny faces during recognition
+SFACE_RECOG_BLUR_THRESHOLD = 70.0       # Reject blurry face ROI during recognition
 
 # Multi-face stabilization cache
 SFACE_CACHE_REUSE_FRAMES = 2        # Reuse last recognition for up to N frames if same face box persists
@@ -103,28 +125,41 @@ ASYNC_CAMERA_CAPTURE  = True        # Read camera frames on a background thread
 # ── Enrollment Settings ───────────────────────────────────────────────────────
 # CRITICAL: SFace needs fewer images than LBPH!
 if RECOGNITION_ENGINE == "SFACE":
-    ENROLL_FRAME_COUNT = 10         # SFace: 10 images is enough
+    ENROLL_FRAME_COUNT = 20         # SFace: 20 images improves identity separation
 else:
     ENROLL_FRAME_COUNT = 30         # LBPH: needs 30 for good accuracy
 
 ENROLL_CAPTURE_DELAY  = 0.4         # Seconds between auto-captures
 ENROLL_COUNTDOWN      = 3           # Countdown before enrollment starts
 ENROLL_STAGE_PAUSE_SECONDS = 2.5    # Pause between angle stages
+ENROLL_SECURITY_PROFILE = "STRICT"  # STRICT or BALANCED
 
 # Enrollment quality/pose assistance
 ENROLL_FACE_MIN_AREA_RATIO = 0.04   # Minimum face area ratio in frame for reliable enrollment
 ENROLL_POSE_RELAX_AFTER_SECONDS = 8.0  # After this, pose thresholds are relaxed to reduce user friction
 ENROLL_SAVE_FACE_CROPS = True       # Save aligned crop-like face ROI alongside full frame for quick QA
+ENROLL_STAGE_TIMEOUT_SECONDS = 20.0  # Warn operator if one stage takes too long
+
+# Basic anti-spoof/liveness controls during enrollment
+ENROLL_LIVENESS_CHALLENGE_ENABLED = True   # Require pose transition from front baseline
+ENROLL_REQUIRED_POSE_DELTA = 0.06          # Minimum yaw/pitch shift to pass movement challenge
+ENROLL_MIN_STABLE_FRAMES = 3               # Require N stable valid frames before each capture
+
+# Balanced profile softens strict defaults without changing code paths
+if ENROLL_SECURITY_PROFILE == "BALANCED":
+    ENROLL_REQUIRED_POSE_DELTA = 0.04
+    ENROLL_MIN_STABLE_FRAMES = 2
+    ENROLL_FACE_MIN_AREA_RATIO = 0.035
 
 # ── Multi-Angle Enrollment Strategy ───────────────────────────────────────────
 if RECOGNITION_ENGINE == "SFACE":
-    # SFace: Fewer images, emphasis on quality and variety
+    # SFace: Balanced quality and diversity for stronger embeddings
     ENROLLMENT_STRATEGY = [
-        {"angle": "FRONT", "count": 4, "instruction": "Look STRAIGHT at camera"},
-        {"angle": "LEFT",  "count": 2, "instruction": "Turn head to the LEFT"},
-        {"angle": "RIGHT", "count": 2, "instruction": "Turn head to the RIGHT"},
-        {"angle": "UP",    "count": 1, "instruction": "Tilt head UP slightly"},
-        {"angle": "DOWN",  "count": 1, "instruction": "Tilt head DOWN slightly"},
+        {"angle": "FRONT", "count": 8, "instruction": "Look STRAIGHT at camera"},
+        {"angle": "LEFT",  "count": 4, "instruction": "Turn head to the LEFT"},
+        {"angle": "RIGHT", "count": 4, "instruction": "Turn head to the RIGHT"},
+        {"angle": "UP",    "count": 2, "instruction": "Tilt head UP slightly"},
+        {"angle": "DOWN",  "count": 2, "instruction": "Tilt head DOWN slightly"},
     ]
 else:
     # LBPH: More images for better training
