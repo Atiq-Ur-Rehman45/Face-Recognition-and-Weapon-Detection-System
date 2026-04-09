@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Criminal Records{% endblock %}
+
+{% block extra_css %}
+<style>
+.records-wrap { border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--border); }
+.detail-panel { background: var(--bg-tertiary); border-top: 1px solid var(--border); padding: var(--sp-lg); display: none; }
+.detail-panel.open { display: block; animation: slide-down 0.25s ease; }
+@keyframes slide-down { from { opacity:0; transform:translateY(-8px) } to { opacity:1; transform:translateY(0) } }
+.detail-grid { display: grid; grid-template-columns: 200px 1fr; gap: var(--sp-lg); }
+.photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--border); cursor: pointer; transition: transform var(--t-fast); }
+.photo-grid img:hover { transform: scale(1.04); }
+.detail-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-md); }
+.detail-field-label { font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 2px; }
+.detail-field-value { font-size: 13.5px; color: var(--text-primary); }
+.edit-row input, .edit-row select { font-size: 13px; padding: 6px 10px; }
+.photo-modal img { max-width: 90vw; max-height: 75vh; border-radius: var(--r-md); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Criminal Records</h1>
+    <p class="page-subtitle">Manage enrolled profiles and face data</p>
+  </div>
+  <a href="/enroll" class="btn btn-primary">+ Enroll New Person</a>
+</div>
+
+<div class="page-body">
+  <div class="card">
+    <!-- Search & Filter -->
+    <div class="search-bar">
+      <div class="search-input-wrap">
+        <span class="search-icon">🔍</span>
+        <input class="search-input" id="rec-search" placeholder="Search by name or CNIC..." oninput="onSearch()"/>
+      </div>
+      <select class="form-select" id="rec-status-filter" style="width:160px; font-size:12px" onchange="onSearch()">
+        <option value="">All Statuses</option>
+        <option value="Wanted">Wanted</option>
+        <option value="Arrested">Arrested</option>
+        <option value="Released">Released</option>
+        <option value="Deceased">Deceased</option>
+      </select>
+      <div class="text-muted text-sm" id="rec-total-label">Loading...</div>
+    </div>
+
+    <!-- Table -->
+    <div class="data-table-wrap" id="records-table-wrap">
+      <table class="data-table" id="records-table">
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th style="width:48px">Photo</th>
+            <th>Name</th>
+            <th>CNIC</th>
+            <th>Crime Type</th>
+            <th>Status</th>
+            <th>Images</th>
+            <th>Enrolled</th>
+            <th style="width:90px">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="records-tbody">
+          <tr><td colspan="9"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+        </tbody>
+      </table>
+
+      <!-- Expandable detail panel (injected per row) -->
+      <div id="detail-panel" class="detail-panel">
+        <div class="detail-grid">
+          <div>
+            <div class="detail-field-label" style="margin-bottom:var(--sp-sm)">Enrollment Photos</div>
+            <div class="photo-grid" id="detail-photos"></div>
+          </div>
+          <div>
+            <div class="detail-fields" id="detail-fields"></div>
+            <div style="margin-top:var(--sp-md); display:flex; gap:var(--sp-sm)">
+              <button class="btn btn-outline btn-sm" onclick="openEditModal()">✏️ Edit</button>
+              <a class="btn btn-outline btn-sm" id="detail-enroll-more-btn" href="#">+ Add Photos</a>
+              <button class="btn btn-danger btn-sm" id="detail-delete-btn">🗑 Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="rec-pagination"></div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay hidden" id="edit-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">✏️ Edit Criminal Record</div>
+      <button class="modal-close" onclick="closeEditModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex; flex-direction:column; gap:var(--sp-md)">
+        <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="edit-name"/></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-md)">
+          <div class="form-group"><label class="form-label">CNIC</label><input class="form-input" id="edit-cnic"/></div>
+          <div class="form-group"><label class="form-label">Status</label>
+            <select class="form-select" id="edit-status">
+              <option>Wanted</option><option>Arrested</option><option>Released</option><option>Deceased</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label class="form-label">Crime Type</label><input class="form-input" id="edit-crime"/></div>
+        <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="edit-notes"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Photo lightbox -->
+<div class="modal-overlay hidden" id="photo-modal">
+  <div class="modal wide" style="background:transparent; border:none; box-shadow:none; text-align:center">
+    <img id="photo-modal-img" src="" alt="Enrollment photo" style="max-width:90vw; max-height:80vh; border-radius:var(--r-lg); border:1px solid var(--border)"/>
+    <div style="margin-top:var(--sp-sm)">
+      <button class="btn btn-outline" onclick="closePhotoModal()">✕ Close</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/records.js') }}"></script>
+{% endblock %}

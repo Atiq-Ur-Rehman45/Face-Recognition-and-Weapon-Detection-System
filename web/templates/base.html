@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}AI Surveillance System{% endblock %} — FaceGuard</title>
+  <meta name="description" content="AI-powered face recognition and weapon detection surveillance dashboard"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}"/>
+  {% block extra_css %}{% endblock %}
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>"/>
+</head>
+<body>
+
+<!-- ─── Sidebar ─────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">🛡️</div>
+    <div>
+      <div class="sidebar-logo-text">FaceGuard AI</div>
+      <div class="sidebar-logo-sub">Surveillance System</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Overview</div>
+    <a href="/dashboard" class="nav-item {% if active_page=='dashboard' %}active{% endif %}">
+      <span class="nav-icon">📊</span> Dashboard
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">Surveillance</div>
+    <a href="/monitor" class="nav-item {% if active_page=='monitor' %}active{% endif %}">
+      <span class="nav-icon">📹</span> Live Monitor
+    </a>
+    <a href="/logs" class="nav-item {% if active_page=='logs' %}active{% endif %}">
+      <span class="nav-icon">📋</span> Detection Logs
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">Management</div>
+    <a href="/records" class="nav-item {% if active_page=='records' %}active{% endif %}">
+      <span class="nav-icon">🗂️</span> Criminal Records
+    </a>
+    <a href="/enroll" class="nav-item {% if active_page=='enroll' %}active{% endif %}">
+      <span class="nav-icon">👤</span> Enroll Person
+    </a>
+    <a href="/training" class="nav-item {% if active_page=='training' %}active{% endif %}">
+      <span class="nav-icon">🧠</span> Train Model
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px">System</div>
+    <a href="/settings" class="nav-item {% if active_page=='settings' %}active{% endif %}">
+      <span class="nav-icon">⚙️</span> Settings
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="system-status-dot" id="status-dot"></div>
+    <div class="sidebar-footer-text">
+      <div id="sidebar-status-text">Connecting...</div>
+      <div class="text-xs text-muted" id="sidebar-engine-text"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ─── Main Content ─────────────────────────────────────────────────────── -->
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- ─── Toast Container ──────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<!-- ─── Generic Confirm Modal ────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="confirm-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="confirm-title">Confirm</div>
+      <button class="modal-close" onclick="closeConfirm()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-message"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeConfirm()">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Socket.IO ─────────────────────────────────────────────────────────── -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

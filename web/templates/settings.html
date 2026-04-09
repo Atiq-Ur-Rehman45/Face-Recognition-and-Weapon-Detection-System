@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block extra_css %}
+<style>
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-md); }
+.settings-section { display: flex; flex-direction: column; gap: var(--sp-md); }
+.setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-muted); gap: var(--sp-md); }
+.setting-row:last-child { border: none; }
+.setting-info { flex: 1; }
+.setting-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.setting-desc { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.setting-val { font-family: var(--mono); font-size: 12.5px; color: var(--blue); text-align: right; flex-shrink: 0; width: 150px; }
+.setting-val input, .setting-val select { width: 100%; font-size: 13px; padding: 6px; text-align: right; }
+.setting-val input[type=checkbox] { width: auto; transform: scale(1.2); }
+.path-chip { font-size: 11px; font-family: var(--mono); background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 3px 8px; color: var(--text-secondary); word-break: break-all; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Settings</h1>
+    <p class="page-subtitle">Configure system parameters</p>
+  </div>
+  <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+</div>
+
+<div class="page-body">
+  <div class="settings-grid">
+    <!-- Column 1 -->
+    <div class="settings-section">
+      <div class="card">
+        <div class="card-header"><span class="card-title">🧠 Recognition Engine</span></div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Active Engine</div><div class="setting-desc">Face recognition algorithm in use</div></div>
+            <div class="setting-val">
+              <select class="form-select config-input" data-key="RECOGNITION_ENGINE" data-type="string">
+                <option value="SFACE" {% if cfg.RECOGNITION_ENGINE == 'SFACE' %}selected{% endif %}>SFACE</option>
+                <option value="LBPH" {% if cfg.RECOGNITION_ENGINE == 'LBPH' %}selected{% endif %}>LBPH</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Match Threshold (Acquire)</div><div class="setting-desc">Minimum cosine similarity</div></div>
+            <div class="setting-val"><input type="number" step="0.01" class="form-input config-input" data-key="SFACE_MATCH_THRESHOLD_ACQUIRE" data-type="float" value="{{ cfg.SFACE_MATCH_THRESHOLD_ACQUIRE }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Match Threshold (Maintain)</div><div class="setting-desc">Keep tracking threshold</div></div>
+            <div class="setting-val"><input type="number" step="0.01" class="form-input config-input" data-key="SFACE_MATCH_THRESHOLD_MAINTAIN" data-type="float" value="{{ cfg.SFACE_MATCH_THRESHOLD_MAINTAIN }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Consensus Frames</div><div class="setting-desc">Frames before confirming identity</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="SFACE_CONSENSUS_FRAMES" data-type="int" value="{{ cfg.SFACE_CONSENSUS_FRAMES }}"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">📷 Camera & Video</span></div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Default Camera Index</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="CAMERA_INDEX" data-type="int" value="{{ cfg.CAMERA_INDEX }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Async Capture</div></div>
+            <div class="setting-val"><input type="checkbox" class="config-input" data-key="ASYNC_CAMERA_CAPTURE" data-type="bool" {% if cfg.ASYNC_CAMERA_CAPTURE %}checked{% endif %}></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">MJPEG Quality (%)</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="MJPEG_QUALITY" data-type="int" value="{{ cfg.MJPEG_QUALITY }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">MJPEG Max FPS</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="MJPEG_MAX_FPS" data-type="int" value="{{ cfg.MJPEG_MAX_FPS }}"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Column 2 -->
+    <div class="settings-section">
+      <div class="card">
+        <div class="card-header"><span class="card-title">🔫 Weapon Detection</span></div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Weapon Detection</div></div>
+            <div class="setting-val"><input type="checkbox" class="config-input" data-key="ENABLE_WEAPON_DETECTION" data-type="bool" {% if cfg.ENABLE_WEAPON_DETECTION %}checked{% endif %}></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Confidence Threshold</div></div>
+            <div class="setting-val"><input type="number" step="0.01" class="form-input config-input" data-key="WEAPON_CONFIDENCE_THRESHOLD" data-type="float" value="{{ cfg.WEAPON_CONFIDENCE_THRESHOLD }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Alert Cooldown (s)</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="WEAPON_ALERT_COOLDOWN_SECONDS" data-type="int" value="{{ cfg.WEAPON_ALERT_COOLDOWN_SECONDS }}"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">🔔 Alerts & Enrollment</span></div>
+        <div class="card-body">
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Snapshot on Detection</div></div>
+            <div class="setting-val"><input type="checkbox" class="config-input" data-key="SNAPSHOT_ON_DETECTION" data-type="bool" {% if cfg.SNAPSHOT_ON_DETECTION %}checked{% endif %}></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Face Alert Cooldown (s)</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="ALERT_COOLDOWN_SECONDS" data-type="int" value="{{ cfg.ALERT_COOLDOWN_SECONDS }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Enrollment Images</div><div class="setting-desc">Target samples per person</div></div>
+            <div class="setting-val"><input type="number" class="form-input config-input" data-key="ENROLL_FRAME_COUNT" data-type="int" value="{{ cfg.ENROLL_FRAME_COUNT }}"></div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">Liveness Challenge</div></div>
+            <div class="setting-val"><input type="checkbox" class="config-input" data-key="ENROLL_LIVENESS_CHALLENGE_ENABLED" data-type="bool" {% if cfg.ENROLL_LIVENESS_CHALLENGE_ENABLED %}checked{% endif %}></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">📁 System Paths (Read-Only)</span></div>
+        <div class="card-body">
+          {% for label, path in [
+            ('Database', cfg.DB_PATH),
+            ('Snapshots', cfg.CAPTURED_DIR),
+            ('Logs', cfg.LOG_FILE),
+          ] %}
+          <div class="setting-row">
+            <div class="setting-info"><div class="setting-name">{{ label }}</div></div>
+            <div class="path-chip">{{ path }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}

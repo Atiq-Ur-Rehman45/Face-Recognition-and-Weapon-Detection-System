@@ -15,10 +15,20 @@ from config import (
     SFACE_MATCH_THRESHOLD, RECOGNITION_ENGINE, UNKNOWN_LABEL,
     CAMERA_FPS_TARGET, CAMERA_AUTOFOCUS, CAMERA_BUFFER_SIZE,
     WARMUP_FRAMES, ASYNC_CAMERA_CAPTURE, ASYNC_ALERT_PROCESSING,
-    ALERT_WORKER_QUEUE_SIZE
+    ALERT_WORKER_QUEUE_SIZE,
+    ENABLE_WEAPON_DETECTION, WEAPON_ALERT_COOLDOWN_SECONDS,
+    WEAPON_ALERT_ON_UNKNOWN, WEAPON_SNAPSHOT_ON_DETECTION
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    from weapon_engine import AsyncWeaponDetector, draw_weapon_detections
+except Exception:
+    AsyncWeaponDetector = None
+
+    def draw_weapon_detections(frame, detections):
+        return frame
 
 
 class LatestFrameCamera:
@@ -125,6 +135,47 @@ class DirectCamera:
             self.cap.release()
 
 
+def _resize_preserve_aspect(img, target_width, target_height):
+    h, w = img.shape[:2]
+    scale = min(target_width / w, target_height / h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(img, (new_w, new_h))
+    top = (target_height - new_h) // 2
+    bottom = target_height - new_h - top
+    left = (target_width - new_w) // 2
+    right = target_width - new_w - left
+    return cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+
+class VideoFileCamera:
+    """Video file reader with the same interface as camera classes."""
+
+    def __init__(self, video_path):
+        self.video_path = video_path
+        self.cap = None
+        self._frame_count = 0
+
+    def start(self):
+        self.cap = cv2.VideoCapture(self.video_path)
+        if not self.cap.isOpened():
+            raise RuntimeError(f"[MONITOR] Cannot open video file: {self.video_path}")
+        return self
+
+    def read(self):
+        ret, frame = self.cap.read()
+        if ret:
+            frame = _resize_preserve_aspect(frame, FRAME_WIDTH, FRAME_HEIGHT)
+            self._frame_count += 1
+        return ret, frame
+
+    def frame_count(self):
+        return self._frame_count
+
+    def stop(self):
+        if self.cap is not None:
+            self.cap.release()
+
+
 class AlertWorker:
     """Processes slow alert side-effects away from the recognition loop."""
 
@@ -183,6 +234,9 @@ class LiveMonitor:
         self.max_history = 5
         self.camera_stream = None
         self.alert_worker = None
+        self.weapon_detector = None
+        self.weapon_alert_log = {}   # {weapon_type: last_alert_timestamp}
+        self.latest_weapon_result = {"detections": [], "timestamp": 0.0, "frame_id": -1}
         self.engine_text = f"ENGINE: {RECOGNITION_ENGINE}"
         self.ctrl_text = "[Q/ESC] Quit  [S] Snapshot  [P] Pause"
         self.engine_text_width = cv2.getTextSize(
@@ -193,33 +247,51 @@ class LiveMonitor:
         )[0][0]
 
     # ── Main Loop ─────────────────────────────────────────────────────────────
-    def run(self, camera_index=CAMERA_INDEX):
+    def run(self, camera_index=CAMERA_INDEX, video_path=None):
         if not self.engine.model_loaded:
             print("\n[MONITOR] ⚠ No trained model found.")
             print("[MONITOR]   → Enroll faces first (Option 1 in menu), then train (Option 2).\n")
             print("[MONITOR]   Running in DETECTION-ONLY mode (faces detected but not recognized).\n")
 
-        camera_cls = LatestFrameCamera if ASYNC_CAMERA_CAPTURE else DirectCamera
-        self.camera_stream = camera_cls(camera_index).start()
+        if video_path:
+            # Video file mode
+            self.camera_stream = VideoFileCamera(video_path).start()
+            print(f"[MONITOR] ✓ Video file mode: {video_path}")
+        else:
+            # Live camera mode
+            camera_cls = LatestFrameCamera if ASYNC_CAMERA_CAPTURE else DirectCamera
+            self.camera_stream = camera_cls(camera_index).start()
+            print(f"[MONITOR] ✓ Live camera mode: Camera {camera_index}")
         if ASYNC_ALERT_PROCESSING:
             self.alert_worker = AlertWorker(self._process_alert_payload, ALERT_WORKER_QUEUE_SIZE).start()
 
-        # Camera warmup (stabilization)
-        print("\n[MONITOR] Live feed starting...")
-        print("[MONITOR] Warming up camera...")
-        warmup_count = 0
-        while warmup_count < WARMUP_FRAMES:
-            if ASYNC_CAMERA_CAPTURE:
-                current_count = self.camera_stream.frame_count()
-                if current_count > warmup_count:
-                    warmup_count = current_count
-                else:
-                    time.sleep(0.01)
+        if ENABLE_WEAPON_DETECTION and AsyncWeaponDetector is not None:
+            self.weapon_detector = AsyncWeaponDetector().start()
+            if not self.weapon_detector.model_loaded:
+                print(f"[MONITOR] Weapon detector disabled: {self.weapon_detector.last_error}")
+                self.weapon_detector = None
             else:
-                ret, _ = self.camera_stream.read()
-                if ret:
-                    warmup_count += 1
-        print(f"[MONITOR] ✓ Camera ready ({warmup_count} frames discarded)")
+                print("[MONITOR] Weapon detector online (async ONNX worker).")
+
+        # Camera warmup (stabilization) — skip for video files
+        if video_path:
+            print(f"\n[MONITOR] ✓ Video file loaded: {video_path}")
+        else:
+            print("\n[MONITOR] Live feed starting...")
+            print("[MONITOR] Warming up camera...")
+            warmup_count = 0
+            while warmup_count < WARMUP_FRAMES:
+                if ASYNC_CAMERA_CAPTURE:
+                    current_count = self.camera_stream.frame_count()
+                    if current_count > warmup_count:
+                        warmup_count = current_count
+                    else:
+                        time.sleep(0.01)
+                else:
+                    ret, _ = self.camera_stream.read()
+                    if ret:
+                        warmup_count += 1
+            print(f"[MONITOR] ✓ Camera ready ({warmup_count} frames discarded)")
         
         print("[MONITOR] Controls:")
         print("  Q / ESC → Quit")
@@ -237,10 +309,15 @@ class LiveMonitor:
             while True:
                 ret, frame = self.camera_stream.read()
                 if not ret:
+                    if video_path:
+                        # End of video file
+                        print("\n[MONITOR] End of video file reached. Exiting...\n")
+                        break
                     time.sleep(0.005)
                     continue
 
-                frame = cv2.flip(frame, 1)
+                if not video_path:
+                    frame = cv2.flip(frame, 1)
 
                 if not paused:
                     frame_num += 1
@@ -256,13 +333,24 @@ class LiveMonitor:
                     # Recognition
                     results, _ = self.engine.recognize_all_faces(frame)
 
+                    if self.weapon_detector is not None:
+                        self.weapon_detector.submit_frame(frame, frame_num)
+                        self.latest_weapon_result = self.weapon_detector.get_latest_result()
+                        weapon_detections = self.latest_weapon_result.get("detections", [])
+                    else:
+                        weapon_detections = []
+
                     for r in results:
                         self._draw_face_box(frame, r)
                         if r["is_known"]:
                             self._handle_alert(r, frame)
 
+                    if weapon_detections:
+                        draw_weapon_detections(frame, weapon_detections)
+                        self._handle_weapon_alerts(weapon_detections, frame)
+
                     # HUD
-                    self._draw_hud(frame, avg_fps, len(results), frame_num)
+                    self._draw_hud(frame, avg_fps, len(results), frame_num, len(weapon_detections))
                     
                     # Optional: FPS stats overlay
                     if show_fps_stats and len(fps_history) > 0:
@@ -302,6 +390,10 @@ class LiveMonitor:
             if self.alert_worker is not None:
                 self.alert_worker.stop()
                 self.alert_worker = None
+
+            if self.weapon_detector is not None:
+                self.weapon_detector.stop()
+                self.weapon_detector = None
 
             cv2.destroyAllWindows()
         
@@ -370,11 +462,11 @@ class LiveMonitor:
             cv2.rectangle(frame, (x, meter_y), (x + bar_width, meter_y + 5), meter_color, -1)
             cv2.rectangle(frame, (x - 2, y - 2), (x + w + 2, y + h + 2), COLOR_RED, 3)
 
-    def _draw_hud(self, frame, fps, face_count, frame_num):
+    def _draw_hud(self, frame, fps, face_count, frame_num, weapon_count=0):
         h, w = frame.shape[:2]
         cv2.rectangle(frame, (0, 0), (w, 50), (15, 15, 15), -1)
 
-        cv2.putText(frame, "AI FACE RECOGNITION SYSTEM", (10, 18),
+        cv2.putText(frame, "AI FACE + WEAPON RECOGNITION SYSTEM", (10, 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, COLOR_ORANGE, 1)
 
         fps_text = f"FPS: {fps:.1f}"
@@ -385,7 +477,12 @@ class LiveMonitor:
         cv2.putText(frame, faces_text, (120, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_WHITE, 1)
 
-        cv2.putText(frame, self.engine_text, (220, 40),
+        weapons_text = f"Weapons: {weapon_count}"
+        weapon_color = COLOR_RED if weapon_count > 0 else COLOR_WHITE
+        cv2.putText(frame, weapons_text, (220, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, weapon_color, 1)
+
+        cv2.putText(frame, self.engine_text, (350, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_YELLOW, 1)
 
         ts = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
@@ -479,14 +576,65 @@ class LiveMonitor:
         print(f"  Name      : {criminal['name']}")
         print(f"  Crime     : {criminal.get('crime_type', 'N/A')}")
         print(f"  Status    : {criminal.get('status', 'N/A')}")
-        
+
         if RECOGNITION_ENGINE == "SFACE":
             print(f"  Confidence: {confidence:.2f} (Cosine Similarity: Higher = Better)")
         else:
             print(f"  Confidence: {confidence:.2f} (Euclidean Distance: Lower = Better)")
-            
+
         print(f"  Time      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("!" * 60 + "\n")
+
+    def _handle_weapon_alerts(self, weapon_detections, frame):
+        if not WEAPON_ALERT_ON_UNKNOWN:
+            return
+
+        if not weapon_detections:
+            return
+
+        now = time.time()
+        types_in_frame = sorted({d.get("type", "weapon") for d in weapon_detections})
+
+        should_alert = False
+        for weapon_type in types_in_frame:
+            last_alert = self.weapon_alert_log.get(weapon_type, 0.0)
+            if now - last_alert >= WEAPON_ALERT_COOLDOWN_SECONDS:
+                should_alert = True
+                self.weapon_alert_log[weapon_type] = now
+
+        if not should_alert:
+            return
+
+        max_conf = max(float(d.get("confidence", 0.0)) for d in weapon_detections)
+        type_text = ", ".join(types_in_frame)
+
+        ts = datetime.now().strftime("%H:%M:%S")
+        msg = f"ALERT [{ts}] Weapon detected: {type_text} (conf: {max_conf:.2f})"
+        self.detection_history.append(msg)
+        if len(self.detection_history) > self.max_history:
+            self.detection_history.pop(0)
+
+        snapshot_path = None
+        if WEAPON_SNAPSHOT_ON_DETECTION:
+            snapshot_path = self._save_snapshot(frame, tag="weapon", announce=False)
+
+        self.db.log_weapon_detection(
+            weapon_types=type_text,
+            max_confidence=max_conf,
+            snapshot_path=snapshot_path,
+            camera_id=f"webcam_{CAMERA_INDEX}"
+        )
+
+        self._print_weapon_alert(type_text, max_conf)
+
+    def _print_weapon_alert(self, weapon_types, confidence):
+        print("\n" + "#" * 60)
+        print("  WEAPON ALERT")
+        print(f"  Types     : {weapon_types}")
+        print(f"  Confidence: {confidence:.2f}")
+        print(f"  Policy    : {'ALERT ON UNKNOWN ENABLED' if WEAPON_ALERT_ON_UNKNOWN else 'FACE-COUPLED ALERTS'}")
+        print(f"  Time      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("#" * 60 + "\n")
 
     def _save_snapshot(self, frame, tag="snapshot", announce=True):
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")

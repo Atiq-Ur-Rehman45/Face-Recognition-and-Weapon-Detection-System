@@ -195,8 +195,53 @@ SNAPSHOT_ON_DETECTION  = True       # Save snapshot when criminal detected
 ASYNC_ALERT_PROCESSING = True       # Offload alert I/O away from the live loop
 ALERT_WORKER_QUEUE_SIZE = 32        # Bounded queue to avoid runaway alert lag
 
+# ── Weapon Detection (Async Worker) ──────────────────────────────────────────
+ENABLE_WEAPON_DETECTION = True
+WEAPON_MODEL_PATH = os.path.join(MODELS_DIR, "weapon_yolov8n.onnx")
+WEAPON_INPUT_SIZE = (640, 640)
+WEAPON_CONFIDENCE_THRESHOLD = 0.35
+WEAPON_NMS_THRESHOLD = 0.45
+WEAPON_MIN_BOX_AREA = 300
+WEAPON_RESULT_TTL_SECONDS = 0.35      # Drop stale async detections quickly
+WEAPON_WORKER_SLEEP_SECONDS = 0.001   # Small throttle to avoid busy spin
+WEAPON_ALERT_COOLDOWN_SECONDS = 15
+WEAPON_ALERT_ON_UNKNOWN = True
+WEAPON_SNAPSHOT_ON_DETECTION = True
+
+# Model class IDs expected from the weapon model output
+WEAPON_CLASSES = {
+    0: "handgun",
+    1: "rifle",
+    2: "knife",
+    3: "scissors",
+}
+
+WEAPON_THREAT_LEVELS = {
+    "handgun": "CRITICAL",
+    "rifle": "CRITICAL",
+    "knife": "HIGH",
+    "scissors": "MEDIUM",
+}
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE = os.path.join(LOGS_DIR, "system.log")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Web Server Settings
+# ══════════════════════════════════════════════════════════════════════════════
+WEB_HOST          = "0.0.0.0"
+WEB_PORT          = 5000
+WEB_DEBUG         = False                   # Set True during development
+WEB_SECRET_KEY    = "fyp-face-recog-2026"
+
+# ── MJPEG Video Streaming ─────────────────────────────────────────────────────
+MJPEG_QUALITY     = 75                      # JPEG encode quality (1-100)
+MJPEG_MAX_FPS     = 25                      # Cap stream FPS to spare CPU
+
+# ── Uploaded video files (drag-and-drop) ─────────────────────────────────────
+UPLOAD_DIR        = os.path.join(DATA_DIR, "uploads")
+UPLOAD_MAX_MB     = 500                     # Max upload size in MB
+ALLOWED_VIDEO_EXT = {".mp4", ".avi", ".mov", ".mkv"}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Auto-Download Models (SFace Only)
@@ -244,6 +289,21 @@ def download_models_if_needed():
         print("\n  ✓ All models downloaded successfully!")
         print("═" * 60 + "\n")
     return True
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Custom Settings Override
+# ══════════════════════════════════════════════════════════════════════════════
+import json
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+try:
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            _overrides = json.load(f)
+            for _k, _v in _overrides.items():
+                if _k in globals():
+                    globals()[_k] = _v
+except Exception as e:
+    print(f"Error loading settings.json: {e}")
 
 # Ensure all directories exist
 for _dir in [DATA_DIR, CRIMINAL_DB_DIR, CAPTURED_DIR, TRAINING_DIR, MODELS_DIR, LOGS_DIR]:

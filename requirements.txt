@@ -1,8 +1,22 @@
-# Core Machine Learning & Vision Libraries
-opencv-python>=4.8.0          # Deep Learning (YuNet CNN + SFace 128D Embeddings)
+# ── Core ML & Vision ──────────────────────────────────────────────────────────
+opencv-python>=4.8.0           # Deep Learning (YuNet CNN + SFace 128D Embeddings)
 opencv-contrib-python>=4.8.0  # Legacy Fallback (cv2.face.LBPHFaceRecognizer)
-numpy>=1.24.0                 # High-performance matrix & vector math
+numpy>=1.24.0                  # High-performance matrix & vector math
 
-# Optional but recommended
-Pillow>=9.0.0                 # Advanced Image handling utilities
-scikit-learn>=1.3.0           # For future ML clustering extensions
+# ── AI / Recognition ──────────────────────────────────────────────────────────
+onnxruntime>=1.18.0            # Weapon detection ONNX runtime (CPU)
+onnx>=1.15.0
+
+# ── Web Framework ─────────────────────────────────────────────────────────────
+Flask>=3.0.0
+Flask-SocketIO>=5.3.0
+python-engineio>=4.8.0
+python-socketio>=5.10.0
+simple-websocket>=1.0.0        # WebSocket transport for Flask-SocketIO
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+Pillow>=9.0.0                  # Image handling (thumbnails, JPEG conversion)
+scikit-learn>=1.3.0            # K-Means clustering for multi-embedding (Phase 2 accuracy plan)
+
+# ── Optional: fine-tuning / export ───────────────────────────────────────────
+# ultralytics>=8.2.0           # Uncomment if re-training weapon model

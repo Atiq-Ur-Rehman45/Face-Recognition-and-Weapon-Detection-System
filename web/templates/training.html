@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Train Model{% endblock %}
+
+{% block extra_css %}
+<style>
+.training-layout { display: grid; grid-template-columns: 1fr 340px; gap: var(--sp-md); align-items: start; }
+.persons-table td, .persons-table th { padding: 9px var(--sp-md); }
+.image-count-warning { color: var(--yellow); font-size: 12px; }
+.train-btn-wrap { text-align: center; margin: var(--sp-lg) 0; }
+.train-btn { font-size: 16px; padding: 14px 40px; border-radius: var(--r-lg); letter-spacing: 0.02em; }
+.model-info-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-muted); font-size: 13px; }
+.model-info-row:last-child { border: none; }
+.model-info-label { color: var(--text-secondary); font-size: 12px; }
+.training-log { background: var(--bg-primary); border-radius: var(--r-md); padding: var(--sp-md); font-family: var(--mono); font-size: 12px; color: var(--green); min-height: 80px; max-height: 160px; overflow-y: auto; border: 1px solid var(--border); }
+.progress-anim { animation: progress-glow 1.2s ease-in-out infinite; }
+@keyframes progress-glow { 0%,100%{box-shadow:0 0 0 0 transparent} 50%{box-shadow:0 0 8px var(--blue)} }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Train Model</h1>
+    <p class="page-subtitle">Re-train face recognition from enrolled images</p>
+  </div>
+  <span class="badge {% if model_loaded %}badge-green{% else %}badge-yellow{% endif %}">
+    {% if model_loaded %}✓ Model Active — {{ engine }}{% else %}⚠ Model Not Trained{% endif %}
+  </span>
+</div>
+
+<div class="page-body">
+  <div class="training-layout">
+    <!-- Left: Persons table + train button -->
+    <div>
+      <div class="card" style="margin-bottom: var(--sp-md)">
+        <div class="card-header"><span class="card-title">👥 Enrolled Persons</span></div>
+        <div class="data-table-wrap">
+          <table class="data-table persons-table">
+            <thead>
+              <tr><th>Name</th><th>Label</th><th>Crime</th><th>Images</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {% for c in criminals %}
+              <tr>
+                <td><strong>{{ c.name }}</strong></td>
+                <td><span class="badge badge-muted mono">{{ c.face_label }}</span></td>
+                <td>{{ c.crime_type or '—' }}</td>
+                <td>
+                  {% if c.image_count < 5 %}
+                    <span class="image-count-warning">⚠ {{ c.image_count }}</span>
+                  {% else %}
+                    <span style="color:var(--green)">{{ c.image_count }}</span>
+                  {% endif %}
+                </td>
+                <td><span class="badge {% if c.status=='Wanted' %}badge-red{% elif c.status=='Arrested' %}badge-orange{% else %}badge-muted{% endif %}">{{ c.status }}</span></td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="5">
+                  <div class="empty-state" style="padding:var(--sp-xl)">
+                    <div class="empty-state-icon">👤</div>
+                    <div class="empty-state-title">No persons enrolled</div>
+                    <div class="empty-state-text"><a href="/enroll" style="color:var(--blue)">Enroll a person</a> first</div>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Train button + progress -->
+      <div class="card">
+        <div class="card-body">
+          <div class="train-btn-wrap">
+            <button class="btn btn-primary train-btn" id="btn-train" onclick="startTraining()"
+                    {% if not criminals %}disabled{% endif %}>
+              🧠 Start Training
+            </button>
+            <div class="text-muted text-xs" style="margin-top:var(--sp-sm)">
+              This will retrain the model using all enrolled face images.
+              {% if criminals %}Estimated time: ~{{ criminals|length * 3 }}–{{ criminals|length * 6 }}s{% endif %}
+            </div>
+          </div>
+
+          <div id="training-progress-section" style="display:none">
+            <div class="flex gap-sm items-center" style="margin-bottom:var(--sp-sm)">
+              <div class="spinner"></div>
+              <span id="train-status-msg" style="font-size:13px; font-weight:600">Initializing...</span>
+            </div>
+            <div class="progress-wrap" style="height:10px; margin-bottom:var(--sp-sm)">
+              <div class="progress-bar progress-anim" id="train-prog-bar" style="width:0%"></div>
+            </div>
+            <div class="training-log" id="training-log"></div>
+          </div>
+
+          <div id="training-success" style="display:none; text-align:center; padding: var(--sp-md)">
+            <div style="font-size:32px; margin-bottom:var(--sp-xs)">✅</div>
+            <div style="font-weight:700; margin-bottom:4px">Training Complete</div>
+            <div class="text-muted text-sm" id="train-done-msg"></div>
+            <a href="/monitor" class="btn btn-primary" style="margin-top:var(--sp-md)">📹 Start Live Monitoring</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Model info -->
+    <div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">🧠 Model Information</span></div>
+        <div class="card-body">
+          <div class="model-info-row">
+            <div class="model-info-label">Engine</div>
+            <div><span class="badge badge-blue">{{ engine }}</span></div>
+          </div>
+          <div class="model-info-row">
+            <div class="model-info-label">Status</div>
+            <div>{% if model_loaded %}<span class="badge badge-green">Loaded</span>{% else %}<span class="badge badge-yellow">Not Trained</span>{% endif %}</div>
+          </div>
+          <div class="model-info-row">
+            <div class="model-info-label">Persons</div>
+            <div>{{ criminals|length }}</div>
+          </div>
+          <div class="model-info-row">
+            <div class="model-info-label">Total Images</div>
+            <div id="total-images-count">{{ criminals | sum(attribute='image_count') }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:var(--sp-md)">
+        <div class="card-header"><span class="card-title">💡 Tips</span></div>
+        <div class="card-body">
+          <ul style="font-size:12.5px; color:var(--text-secondary); display:flex; flex-direction:column; gap:8px; padding-left:16px">
+            <li>Minimum <strong style="color:var(--text-primary)">10 images</strong> per person recommended</li>
+            <li>Include multiple angles: front, left, right</li>
+            <li>Ensure good lighting during enrollment</li>
+            <li>Re-train after every new enrollment or deletion</li>
+            <li>⚠ Images &lt; 5 shown in yellow — enroll more</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/training.js') }}"></script>
+{% endblock %}

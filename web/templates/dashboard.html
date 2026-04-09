@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-md); margin-bottom: var(--sp-lg); }
+.main-grid  { display: grid; grid-template-columns: 1fr 360px; gap: var(--sp-md); }
+.feed-preview { position: relative; border-radius: var(--r-lg); overflow: hidden; background: #000; aspect-ratio: 16/9; cursor: pointer; }
+.feed-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.feed-preview-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--t-normal); }
+.feed-preview:hover .feed-preview-overlay { opacity: 1; }
+.feed-preview-badge { position: absolute; top: 12px; left: 12px; }
+.quick-actions { display: flex; gap: var(--sp-sm); flex-wrap: wrap; margin-top: var(--sp-md); }
+.alerts-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.recent-detections-row { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-sm) 0; border-bottom: 1px solid var(--border-muted); }
+.recent-detections-row:last-child { border: none; }
+.detection-mini-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-sm); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Real-time surveillance overview &amp; system status</p>
+  </div>
+  <div class="flex gap-sm items-center">
+    <div class="badge badge-muted" id="dash-time"></div>
+    <a href="/monitor" class="btn btn-primary">📹 Open Live Monitor</a>
+  </div>
+</div>
+
+<div class="page-body">
+  <!-- Stats Row -->
+  <div class="stats-grid">
+    <div class="stat-card" style="--accent:var(--blue); --icon-bg:var(--blue-glow)">
+      <div class="stat-icon">👥</div>
+      <div class="stat-info">
+        <div class="stat-value" id="stat-enrolled">{{ enrolled }}</div>
+        <div class="stat-label">Persons Enrolled</div>
+      </div>
+    </div>
+    <div class="stat-card" style="--accent:var(--green); --icon-bg:var(--green-glow)">
+      <div class="stat-icon">🧠</div>
+      <div class="stat-info">
+        <div class="stat-value" id="stat-model">{{ 'Active' if model_loaded else 'Untrained' }}</div>
+        <div class="stat-label">Model Status — {{ engine }}</div>
+      </div>
+    </div>
+    <div class="stat-card" style="--accent:var(--red); --icon-bg:var(--red-glow)">
+      <div class="stat-icon">⚠️</div>
+      <div class="stat-info">
+        <div class="stat-value" id="stat-face-logs">{{ face_logs }}</div>
+        <div class="stat-label">Face Detections Total</div>
+      </div>
+    </div>
+    <div class="stat-card" style="--accent:var(--orange); --icon-bg:var(--orange-glow)">
+      <div class="stat-icon">🔫</div>
+      <div class="stat-info">
+        <div class="stat-value" id="stat-weapon-logs">{{ weapon_logs }}</div>
+        <div class="stat-label">Weapon Detections Total</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main 2-col grid -->
+  <div class="main-grid">
+    <!-- Left: Feed preview + quick actions -->
+    <div>
+      <div class="card" style="margin-bottom: var(--sp-md)">
+        <div class="card-header">
+          <span class="card-title">📹 Live Camera Preview</span>
+          <span class="badge badge-muted" id="feed-fps-badge">FPS: --</span>
+        </div>
+        <div class="card-body" style="padding-top: var(--sp-sm)">
+          <a href="/monitor" class="feed-preview" id="dash-preview-wrap">
+            <img src="/video_feed" id="dash-preview-img"
+                 onerror="this.src='/static/img/offline.svg'"
+                 alt="Live feed preview"/>
+            <div class="feed-preview-overlay">
+              <span style="color:#fff;font-size:36px;text-shadow:0 2px 8px rgba(0,0,0,0.6)">▶</span>
+            </div>
+            <div class="feed-preview-badge">
+              <span class="badge badge-red" id="feed-status-badge" style="display:none">● LIVE</span>
+            </div>
+          </a>
+          <div class="quick-actions">
+            <button class="btn btn-primary" onclick="startFeed()">▶ Start Live Feed</button>
+            <button class="btn btn-outline" onclick="stopFeed()" id="btn-stop-dash">⏹ Stop</button>
+            <a href="/enroll" class="btn btn-outline">👤 Enroll Person</a>
+            <a href="/training" class="btn btn-outline">🧠 Train Model</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- HUD Stats bar -->
+      <div class="card" id="hud-card" style="display:none">
+        <div class="card-body" style="padding: var(--sp-sm) var(--sp-lg)">
+          <div class="flex gap-lg items-center" style="font-family:var(--mono); font-size:12.5px">
+            <span>FPS: <strong id="hud-fps" style="color:var(--green)">--</strong></span>
+            <span>Faces: <strong id="hud-faces" style="color:var(--text-primary)">0</strong></span>
+            <span>Weapons: <strong id="hud-weapons" style="color:var(--text-primary)">0</strong></span>
+            <span>Source: <strong id="hud-source" style="color:var(--blue)">--</strong></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Recent alerts -->
+    <div>
+      <div class="card" style="height:100%">
+        <div class="card-header" style="padding-bottom: var(--sp-md)">
+          <span class="card-title">🚨 Recent Alerts</span>
+          <a href="/logs" class="btn btn-ghost btn-sm">View All →</a>
+        </div>
+        <div style="padding: 0 var(--sp-md) var(--sp-md)">
+          <div class="alerts-list" id="alerts-list">
+            <div class="empty-state" style="padding: var(--sp-xl)">
+              <div class="empty-state-icon">🔕</div>
+              <div class="empty-state-title">No alerts yet</div>
+              <div class="empty-state-text">Start the live feed to begin monitoring</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

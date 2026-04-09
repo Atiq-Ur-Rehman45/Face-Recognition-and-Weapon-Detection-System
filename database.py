@@ -49,6 +49,15 @@ class DatabaseManager:
                     counter INTEGER DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS weapon_detection_logs (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    weapon_types     TEXT,
+                    max_confidence   REAL,
+                    camera_id        TEXT DEFAULT 'webcam_0',
+                    timestamp        TEXT DEFAULT (datetime('now')),
+                    snapshot_path    TEXT
+                );
+
                 INSERT OR IGNORE INTO face_label_counter (id, counter) VALUES (1, 0);
             """)
         print("[DB] Database initialized successfully.")
@@ -189,6 +198,29 @@ class DatabaseManager:
     def get_detection_count(self):
         with self._get_connection() as conn:
             return conn.execute("SELECT COUNT(*) FROM detection_logs").fetchone()[0]
+
+    def log_weapon_detection(self, weapon_types, max_confidence, snapshot_path=None, camera_id="webcam_0"):
+        """Log a weapon detection event."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """INSERT INTO weapon_detection_logs
+                   (weapon_types, max_confidence, camera_id, snapshot_path)
+                   VALUES (?, ?, ?, ?)""",
+                (weapon_types, max_confidence, camera_id, snapshot_path)
+            )
+
+    def get_recent_weapon_detections(self, limit=20):
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """SELECT * FROM weapon_detection_logs
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_weapon_detection_count(self):
+        with self._get_connection() as conn:
+            return conn.execute("SELECT COUNT(*) FROM weapon_detection_logs").fetchone()[0]
 
     # ─── Label Management ─────────────────────────────────────────────────────
 

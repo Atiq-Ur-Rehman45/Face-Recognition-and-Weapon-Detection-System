@@ -44,6 +44,7 @@ MENU = """
 ║  1. Enroll New Criminal      ║
 ║  2. Train / Retrain Model    ║
 ║  3. Start Live Recognition   ║
+║  3.5 Test Video File         ║
 ║  4. View All Records         ║
 ║  5. View Detection Logs      ║
 ║  6. Delete Criminal Record   ║
@@ -237,7 +238,8 @@ def view_detection_logs(db):
         print(f"  [{ts}]  {name:<20}  Conf: {conf:<7.2f}  Camera: {cam}")
 
     print("═" * 70)
-    print(f"  Total events: {db.get_detection_count()}\n")
+    print(f"  Face events  : {db.get_detection_count()}")
+    print(f"  Weapon events: {db.get_weapon_detection_count()}\n")
 
 
 def delete_criminal(db, trainer, engine):
@@ -312,7 +314,8 @@ def system_status(db, engine):
     print(f"  Enrolled People: {len(criminals)}")
     print(f"  Total Images   : {total_images}")
     print(f"  Model Trained  : {'✓ YES' if engine.model_loaded else '✗ NO — train first'}")
-    print(f"  Detection Logs : {db.get_detection_count()} events")
+    print(f"  Face Logs      : {db.get_detection_count()} events")
+    print(f"  Weapon Logs    : {db.get_weapon_detection_count()} events")
     print(f"  Log File       : {LOG_FILE}")
 
     from config import CRIMINAL_DB_DIR, CAPTURED_DIR, LBPH_MODEL_PATH
@@ -321,6 +324,49 @@ def system_status(db, engine):
     print(f"    Captures      → {CAPTURED_DIR}")
     print(f"    Model         → {LBPH_MODEL_PATH}")
     print("═" * 55 + "\n")
+
+
+def test_video_recognition(engine, db, monitor):
+    """Test face and weapon recognition on a video file (MP4, AVI, etc)."""
+    print("\n" + "═" * 55)
+    print("  VIDEO FILE RECOGNITION TEST")
+    print("═" * 55)
+    print("  Test weapon detection without real weapons!")
+    print("  Use downloaded YouTube MP4s or any local video file.\n")
+
+    if not engine.model_loaded:
+        print("  ⚠ No trained face model detected.")
+        print("  → Face recognition disabled; weapon detection will run.\n")
+        if not confirm("  Continue in weapon-detection-only mode?"):
+            return
+
+    # Refresh label map before starting
+    label_map = db.get_label_criminal_map()
+    engine.update_label_map(label_map)
+    total_enrolled = len(label_map)
+    print(f"\n  Monitoring for {total_enrolled} enrolled criminal(s).")
+
+    # Get video file path
+    video_path = input("  Enter video file path (or filename if in current directory): ").strip()
+    if not video_path:
+        print("  ✗ No path provided. Cancelled.\n")
+        return
+
+    if not os.path.isfile(video_path):
+        print(f"  ✗ File not found: {video_path}\n")
+        return
+
+    print(f"\n  Loading video: {video_path}")
+    print(f"  Controls: Q/ESC=Quit  S=Snapshot  P=Pause\n")
+    input("  Press ENTER to start playback...")
+
+    try:
+        monitor.run(video_path=video_path)
+    except RuntimeError as e:
+        print(f"\n  ✗ Video error: {e}")
+        print("  → Check file format and path.\n")
+    except Exception as e:
+        print(f"\n  ✗ Unexpected error: {e}\n")
 
 
 # ── Main Entry Point ──────────────────────────────────────────────────────────
@@ -361,6 +407,9 @@ def main():
         elif choice == "3":
             start_live_recognition(engine, db, monitor)
 
+        elif choice == "3.5":
+            test_video_recognition(engine, db, monitor)
+
         elif choice == "4":
             view_all_records(db)
 
@@ -378,7 +427,7 @@ def main():
             break
 
         else:
-            print(f"\n  ✗ Invalid option: '{choice}'. Choose 0–7.\n")
+            print(f"\n  ✗ Invalid option: '{choice}'. Choose 0–7 or 3.5.\n")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Detection Logs{% endblock %}
+
+{% block extra_css %}
+<style>
+.log-table td { font-size: 12.5px; }
+.snap-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: var(--r-sm); cursor: pointer; border: 1px solid var(--border); transition: transform var(--t-fast); }
+.snap-thumb:hover { transform: scale(1.1); }
+.conf-bar { width: 60px; height: 5px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 6px; }
+.conf-fill { height: 100%; background: var(--green); border-radius: 3px; }
+.threat-CRITICAL { color: var(--red); }
+.threat-HIGH { color: var(--orange); }
+.threat-MEDIUM { color: var(--yellow); }
+.filter-bar { display: flex; gap: var(--sp-sm); padding: var(--sp-md) var(--sp-lg); border-bottom: 1px solid var(--border); align-items: center; flex-wrap: wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Detection Logs</h1>
+    <p class="page-subtitle">Historical face and weapon detection records</p>
+  </div>
+  <div class="flex gap-sm">
+    <button class="btn btn-outline" onclick="exportLogs('faces')">⬇ Export Faces CSV</button>
+    <button class="btn btn-outline" onclick="exportLogs('weapons')">⬇ Export Weapons CSV</button>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="card">
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-faces-btn" onclick="switchTab('faces')">👤 Face Detections <span id="face-count-badge" class="badge badge-muted" style="margin-left:4px">--</span></button>
+      <button class="tab-btn" id="tab-weapons-btn" onclick="switchTab('weapons')">🔫 Weapon Detections <span id="weapon-count-badge" class="badge badge-muted" style="margin-left:4px">--</span></button>
+    </div>
+
+    <!-- Face logs tab -->
+    <div class="tab-panel active" id="tab-faces">
+      <div class="filter-bar">
+        <div class="search-input-wrap" style="max-width:260px">
+          <span class="search-icon">🔍</span>
+          <input class="search-input" id="face-search" placeholder="Filter by name..." oninput="loadFaceLogs()"/>
+        </div>
+        <div class="text-muted text-xs" id="face-total-text"></div>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Detected Name</th>
+              <th>Confidence</th>
+              <th>Camera</th>
+              <th>Snapshot</th>
+            </tr>
+          </thead>
+          <tbody id="face-logs-body">
+            <tr><td colspan="5"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="face-pagination"></div>
+    </div>
+
+    <!-- Weapon logs tab -->
+    <div class="tab-panel" id="tab-weapons">
+      <div class="filter-bar">
+        <div class="text-muted text-xs" id="weapon-total-text"></div>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Weapon Types</th>
+              <th>Max Confidence</th>
+              <th>Threat Level</th>
+              <th>Camera</th>
+              <th>Snapshot</th>
+            </tr>
+          </thead>
+          <tbody id="weapon-logs-body">
+            <tr><td colspan="6"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="weapon-pagination"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Snapshot lightbox -->
+<div class="modal-overlay hidden" id="snap-modal">
+  <div class="modal wide" style="background:transparent; border:none; box-shadow:none; text-align:center">
+    <img id="snap-modal-img" src="" alt="Detection snapshot" style="max-width:90vw; max-height:78vh; border-radius:var(--r-lg); border:1px solid var(--border)"/>
+    <div style="margin-top:var(--sp-sm)">
+      <button class="btn btn-outline" onclick="closeSnapModal()">✕ Close</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/logs.js') }}"></script>
+{% endblock %}

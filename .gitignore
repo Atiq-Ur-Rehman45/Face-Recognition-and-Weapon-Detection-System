@@ -1,33 +1,37 @@
-# Model files (large, auto-downloaded)
+# Python environment
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# Models (Optional: Comment out if you want to push models to GitHub)
 models/*.onnx
 models/*.pkl
 models/*.xml
 
-# Database files (user-specific)
-*.db
-*.db-journal
-data/criminal_records.db
+# Runtime Data (NEVER push database or user photos)
+data/*.json
+data/*.pkl
+data/*.db
+data/*.db-journal
 
-# Captured data (personal)
+# Directories to ignore contents but keep the folder
 data/criminal_db/*
 data/captured_faces/*
 data/training_data/*
+data/uploads/*
+data/uploaded_videos/*
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-
-# Logs
-logs/*.log
-*.log
-
-# IDE
-.vscode/
-.idea/
-
-# Keep folder structure
-!models/.gitkeep
+# Keep the directory structures intact via .gitkeep
 !data/criminal_db/.gitkeep
 !data/captured_faces/.gitkeep
-!logs/.gitkeep
+!data/training_data/.gitkeep
+!data/uploads/.gitkeep
+!data/uploaded_videos/.gitkeep
+
+# System/IDE Files
+.vscode/
+.idea/
+.DS_Store
+logs/*.log
+*.log

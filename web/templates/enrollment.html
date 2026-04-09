@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Enroll Person{% endblock %}
+
+{% block extra_css %}
+<style>
+.enroll-layout { display: grid; grid-template-columns: 1fr 400px; gap: var(--sp-md); align-items: start; }
+.cam-frame { border-radius: var(--r-lg); overflow: hidden; background: #000; position: relative; aspect-ratio: 4/3; }
+.cam-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-overlay-banner { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.75)); padding: var(--sp-md); }
+.capture-ring { width: 72px; height: 72px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; margin: 0 auto var(--sp-sm); position: relative; }
+.capture-ring svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+.capture-ring-text { font-size: 17px; font-weight: 700; color: #fff; font-family: var(--mono); }
+.stages-list { display: flex; flex-direction: column; gap: 2px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-md); }
+.enroll-step-badge {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--text-muted); flex-shrink: 0;
+}
+.enroll-step-badge.active { background: var(--blue-glow); border-color: var(--blue); color: var(--blue); }
+.enroll-step-badge.done   { background: var(--green-glow); border-color: var(--green); color: var(--green); }
+.step-row { display: flex; align-items: center; gap: var(--sp-sm); padding: 4px 0; font-size: 13px; color: var(--text-secondary); }
+.step-row.active { color: var(--text-primary); font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Enroll New Person</h1>
+    <p class="page-subtitle">Register face samples for a new criminal record</p>
+  </div>
+</div>
+
+<div class="page-body">
+  <!-- Step 1: Fill Details -->
+  <div id="step-form-section">
+    <div class="enroll-layout">
+      <!-- Camera preview (offline until enrollment starts) -->
+      <div>
+        <div class="cam-frame card" id="enroll-cam-wrap">
+          <img src="/enrollment_feed" id="enroll-cam-img" alt="Enrollment camera"/>
+          <div class="cam-overlay-banner" id="cam-banner" style="display:none">
+            <div class="capture-ring" id="capture-ring">
+              <svg width="72" height="72" viewBox="0 0 72 72">
+                <circle cx="36" cy="36" r="32" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="4"/>
+                <circle id="ring-circle" cx="36" cy="36" r="32" fill="none" stroke="var(--green)" stroke-width="4"
+                        stroke-dasharray="201" stroke-dashoffset="201" style="transition:stroke-dashoffset 0.4s ease"/>
+              </svg>
+              <div class="capture-ring-text" id="ring-text">0</div>
+            </div>
+            <div style="text-align:center; color:#fff; font-size:12px; font-weight:600" id="cam-instruction">Position your face</div>
+          </div>
+        </div>
+
+        <!-- Stage progress (shown during enrollment) -->
+        <div class="card" style="margin-top: var(--sp-sm); display:none" id="stages-card">
+          <div class="card-header"><span class="card-title">📐 Pose Progress</span></div>
+          <div class="card-body" style="padding-top: var(--sp-sm)">
+            <div class="stages-list" id="stages-list"></div>
+            <hr class="divider"/>
+            <div class="progress-wrap" style="height:8px">
+              <div class="progress-bar green" id="total-progress" style="width:0%"></div>
+            </div>
+            <div class="flex justify-between" style="margin-top:4px; font-size:11px; color:var(--text-muted)">
+              <span id="prog-count">0 / 0 captured</span>
+              <span id="prog-pct">0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Form -->
+      <div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">👤 Criminal Details</span></div>
+          <div class="card-body">
+            <form id="enroll-form" autocomplete="off">
+              <div style="display:flex; flex-direction:column; gap:var(--sp-md)">
+                <div class="form-group">
+                  <label class="form-label">Full Name *</label>
+                  <input class="form-input" id="f-name" placeholder="Enter full name" required/>
+                </div>
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label class="form-label">CNIC / ID</label>
+                    <input class="form-input" id="f-cnic" placeholder="e.g. 35200-1234567-1"/>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" id="f-status">
+                      <option value="Wanted">Wanted</option>
+                      <option value="Arrested">Arrested</option>
+                      <option value="Released">Released</option>
+                      <option value="Deceased">Deceased</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Crime Type</label>
+                  <select class="form-select" id="f-crime">
+                    <option value="Robbery">Robbery</option>
+                    <option value="Assault">Assault</option>
+                    <option value="Murder">Murder</option>
+                    <option value="Terrorism">Terrorism</option>
+                    <option value="Drug Trafficking">Drug Trafficking</option>
+                    <option value="Theft">Theft</option>
+                    <option value="Fraud">Fraud</option>
+                    <option value="Kidnapping">Kidnapping</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Notes</label>
+                  <textarea class="form-textarea" id="f-notes" placeholder="Additional notes..."></textarea>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="card-footer" style="justify-content:space-between">
+            <button class="btn btn-outline" onclick="cancelEnrollment()" id="btn-cancel-enroll" style="display:none">✕ Cancel</button>
+            <div class="flex gap-sm" style="margin-left:auto">
+              <button class="btn btn-primary" id="btn-start-enroll" onclick="beginEnrollment()">▶ Start Enrollment</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Post-enrollment actions (shown after complete) -->
+        <div class="card" id="enroll-complete-card" style="display:none; margin-top:var(--sp-sm)">
+          <div class="card-body" style="text-align:center">
+            <div style="font-size:36px; margin-bottom:var(--sp-sm)">✅</div>
+            <h3 style="margin-bottom:var(--sp-xs)">Enrollment Complete!</h3>
+            <p class="text-muted text-sm" id="enroll-complete-msg">Successfully captured face samples.</p>
+            <div class="flex gap-sm" style="margin-top:var(--sp-md); justify-content:center">
+              <a href="/training" class="btn btn-primary">🧠 Train Model Now</a>
+              <button class="btn btn-outline" onclick="resetEnrollForm()">+ Enroll Another</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/enrollment.js') }}"></script>
+{% endblock %}

@@ -11,6 +11,7 @@ face_recognition_system/
 ├── face_engine.py        ← Detection (Haar Cascade) + Recognition (LBPH)
 ├── trainer.py            ← Model training from enrolled images
 ├── monitor.py            ← Live webcam feed with HUD overlay
+├── weapon_engine.py      ← Async weapon detector worker (ONNX)
 ├── requirements.txt      ← Python dependencies
 │
 ├── data/
@@ -19,7 +20,8 @@ face_recognition_system/
 │   └── criminal_records.db  ← SQLite database
 │
 ├── models/
-│   └── lbph_face_model.xml  ← Trained recognition model (auto-generated)
+│   ├── lbph_face_model.xml  ← Trained recognition model (auto-generated)
+│   └── weapon_yolov8n.onnx  ← Weapon detector model (add manually)
 │
 └── logs/
     └── system.log        ← Runtime logs
@@ -32,7 +34,7 @@ face_recognition_system/
 ### Step 1 — Install Python dependencies
 
 ```bash
-pip install opencv-python opencv-contrib-python numpy
+pip install opencv-python opencv-contrib-python numpy onnxruntime onnx
 ```
 
 > ⚠️ You **must** install `opencv-contrib-python` for the LBPH face recognizer.
@@ -77,6 +79,14 @@ python main.py
 - Webcam opens with real-time detection
 - **Red box** = Known criminal detected → Alert triggered!
 - **Green box** = Unknown person
+- **Weapon box** = Weapon candidate from async ONNX worker (independent alert policy)
+
+### 3.5 Test Video File (Weapon Detection Demo)
+- Select **Option 3.5**
+- Enter path to a local MP4 or AVI file
+- Plays video with face + weapon detection overlay
+- **No camera needed** — perfect for testing with downloaded YouTube clips
+- Same detection logic as live feed; ideal for safe testing without real weapons
 
 ### Controls (during live feed)
 | Key | Action |
@@ -127,10 +137,17 @@ python main.py
 
 ---
 
-## 📌 Future Modules (Planned)
-- ✅ Face Recognition (this module)
-- 🔲 Weapon Detection (YOLOv8 / SSD)
+## 📌 Module Status
+- ✅ Face Recognition (active)
+- ✅ Weapon Detection (YOLOv8 ONNX async worker)
 - 🔲 Alert & Notification (email / SMS)
 - 🔲 Web Dashboard (Flask + HTML)
+
+## 🎥 Safe Weapon Testing Without Real Weapons
+1. Download local MP4 clips from YouTube showing weapon-like motion scenarios.
+2. Place clips in a local test folder and run Option 3 against webcam or video runner (next step module).
+3. Validate detections under motion blur, low light, and multiple people.
+4. Include no-weapon clips to tune thresholds and reduce false positives.
+5. Use toy/printed objects for desk testing only; avoid real weapons.
 
 
